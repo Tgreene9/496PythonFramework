@@ -57,17 +57,21 @@ class ModbusScanner:
         else:
             return None
 
-    def read_modbus_memory(self, client, start_address=0, end_address=10000):
+    def read_modbus_memory(self, client, addresses=None):
         sections = [
-            ("Coil", client.read_coils, "bits"),
-            ("Discrete Input", client.read_discrete_inputs, "bits"),
-            ("Input Register", client.read_input_registers, "registers"),
-            ("Holding Register", client.read_holding_registers, "registers"),
+            ("Coil", client.read_coils, "bits", 0),
+            ("Discrete Input", client.read_discrete_inputs, "bits", 10000),
+            ("Input Register", client.read_input_registers, "registers", 30000),
+            ("Holding Register", client.read_holding_registers, "registers", 40000),
         ]
         memory_map = {}
-        for section_name, read_func, attribute_name in sections:
+        for section_name, read_func, attribute_name, start_address in sections:
             memory_map[section_name] = {}
-            for address in range(start_address, end_address):
+            if addresses is None:
+                address_range = range(start_address, start_address + 10000)  # adjust this range as needed
+            else:
+                address_range = addresses
+            for address in address_range:
                 try:
                     response = read_func(address, 1)
                     if response is not None and not response.isError():
@@ -78,6 +82,7 @@ class ModbusScanner:
                 except ModbusException as e:
                     print(f'ModbusException occurred at address {address} in {section_name}: {e}')
         return memory_map
+
 
 
     def modbus_scan(self):
@@ -106,13 +111,14 @@ class ModbusScanner:
 
     def print_clients(self, re_read_memory=False):
         for i, client in enumerate(self.clients, 1):
-            ip, device_info, role, _ = client
+            ip, device_info, role, memory_map = client
             if re_read_memory and role == "Server":
                 new_client = ModbusTcpClient(ip)
                 new_client.connect()
                 try:
-                    memory_map = self.read_modbus_memory(new_client)
-                    self.clients[i-1] = (ip, device_info, role, memory_map)
+                    addresses = set(address for section in memory_map.values() for address in section.keys())
+                    new_memory_map = self.read_modbus_memory(new_client, addresses=addresses)
+                    self.clients[i-1] = (ip, device_info, role, new_memory_map)
                 except Exception as e:
                     logger.exception(f"Failed to re-read memory map for {ip}: {e}")
                 finally:
@@ -167,10 +173,12 @@ class ModbusScanner:
                 table[section_name][i, 0] = address
                 table[section_name][i, 1] = value
 
+        valid_addresses = set(address for section in memory_map.values() for address in section.keys())
+
         # Poll the device and update the table
         for poll_num in range(polling_amount):
             time.sleep(polling_rate)
-            new_memory_map = self.read_modbus_memory(client)
+            new_memory_map = self.read_modbus_memory(client, addresses=valid_addresses)
             for section_name in table:
                 new_section = new_memory_map.get(section_name, {})
                 for i, address in enumerate(table[section_name][:, 0]):
@@ -184,6 +192,8 @@ class ModbusScanner:
             print("Memory Address | Initial Value | " + " | ".join(f"{i+1}st Poll Value" for i in range(polling_amount)))
             for row in section_table:
                 print(" | ".join(str(cell) for cell in row))
+
+
 
     def searchsploit(self, vendor_name):
         try:
@@ -284,3 +294,4 @@ class ModbusScanner:
 if __name__ == '__main__':
     scanner = ModbusScanner()
     scanner.run()
+    
