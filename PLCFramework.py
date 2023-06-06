@@ -58,7 +58,6 @@ class ModbusScanner:
             return None
 
     def read_modbus_memory(self, client, start_address=0, end_address=10000):
-        block_size = 100
         sections = [
             ("Coil", client.read_coils, "bits"),
             ("Discrete Input", client.read_discrete_inputs, "bits"),
@@ -68,18 +67,18 @@ class ModbusScanner:
         memory_map = {}
         for section_name, read_func, attribute_name in sections:
             memory_map[section_name] = {}
-            for block_start in range(start_address, end_address, block_size):
-                block_end = min(block_start + block_size, end_address)
+            for address in range(start_address, end_address):
                 try:
-                    response = read_func(block_start, block_end - block_start)
-                    if not isinstance(response, ModbusIOException):
+                    response = read_func(address, 1)
+                    if response is not None and not response.isError():
                         values = getattr(response, attribute_name)
-                        for i, value in enumerate(values):
-                            if value != 0:
-                                memory_map[section_name][block_start + i] = value
-                except ModbusException:
+                        memory_map[section_name][address] = values[0]
+                except ModbusIOException:
                     pass
+                except ModbusException as e:
+                    print(f'ModbusException occurred at address {address} in {section_name}: {e}')
         return memory_map
+
 
     def modbus_scan(self):
         self.clients.clear()
@@ -91,9 +90,8 @@ class ModbusScanner:
                 device_info = self.read_device_identification(ip)
                 memory_map = None
                 try:
-                    response = client.report_slave_id()
-                    if response and not isinstance(response, ModbusIOException):
-                        memory_map = self.read_modbus_memory(client)
+                    memory_map = self.read_modbus_memory(client)
+                    if memory_map:  # If there is a memory map, assume it's a server
                         self.clients.append((ip, device_info, "Server", memory_map))
                     else:
                         self.clients.append((ip, device_info, "Client", None))
@@ -104,6 +102,7 @@ class ModbusScanner:
             except Exception as e:
                 logger.exception(f"Failed to connect or read memory map for {ip}: {e}")
                 self.clients.append((ip, None, None, None))
+
 
     def print_clients(self, re_read_memory=False):
         for i, client in enumerate(self.clients, 1):
