@@ -57,33 +57,36 @@ class ModbusScanner:
         else:
             return None
 
-    def read_modbus_memory(self, client, addresses=None):
-        sections = [
-            ("Coil", client.read_coils, "bits", 0),
-            ("Discrete Input", client.read_discrete_inputs, "bits", 10000),
-            ("Input Register", client.read_input_registers, "registers", 30000),
-            ("Holding Register", client.read_holding_registers, "registers", 40000),
-        ]
+    def read_modbus_memory(self, client):
+        sections = {
+            'coils': {'start_address': 0, 'num_elements': 100, 'read_func': client.read_coils},
+            'discrete_inputs': {'start_address': 0, 'num_elements': 100, 'read_func': client.read_discrete_inputs},
+            'holding_registers': {'start_address': 0, 'num_elements': 100, 'read_func': client.read_holding_registers},
+            'input_registers': {'start_address': 0, 'num_elements': 100, 'read_func': client.read_input_registers}
+        }
         memory_map = {}
-        for section_name, read_func, attribute_name, start_address in sections:
-            memory_map[section_name] = {}
-            if addresses is None:
-                address_range = range(start_address, start_address + 10000)  # adjust this range as needed
-            else:
-                address_range = addresses
-            for address in address_range:
+        for section, config in sections.items():
+            start_address = config['start_address']
+            num_elements = config['num_elements']
+            read_func = config['read_func']
+            values = {}
+
+            for address in range(start_address, start_address + num_elements):
                 try:
                     response = read_func(address, 1)
-                    if response is not None and not response.isError():
-                        values = getattr(response, attribute_name)
-                        memory_map[section_name][address] = values[0]
-                except ModbusIOException:
-                    pass
+                    if not response.isError():
+                        if section in ['coils', 'discrete_inputs']:
+                            values[address] = response.bits[0]
+                        else:
+                            values[address] = response.registers[0]
                 except ModbusException as e:
-                    print(f'ModbusException occurred at address {address} in {section_name}: {e}')
+                   pass
+
+            # Add the values for the section if no errors occurred
+            if len(values) > 0:
+                memory_map[section] = values
+
         return memory_map
-
-
 
     def modbus_scan(self):
         self.clients.clear()
@@ -116,8 +119,7 @@ class ModbusScanner:
                 new_client = ModbusTcpClient(ip)
                 new_client.connect()
                 try:
-                    addresses = set(address for section in memory_map.values() for address in section.keys())
-                    new_memory_map = self.read_modbus_memory(new_client, addresses=addresses)
+                    new_memory_map = self.read_modbus_memory(new_client)
                     self.clients[i-1] = (ip, device_info, role, new_memory_map)
                 except Exception as e:
                     logger.exception(f"Failed to re-read memory map for {ip}: {e}")
@@ -224,15 +226,15 @@ class ModbusScanner:
                 if selected.lower() == 'back':
                     continue
                 selected = int(selected) - 1
-                if selected < len(self.clients):
-                    _, _, _, memory_map = self.clients[selected]
-                    if memory_map is None:
-                        logger.info("This client doesn't have a memory map.")
-                    else:
-                        for section_name, section in memory_map.items():
-                            logger.info(f"\n{section_name}s:\n{'-'*40}")
-                            for address, value in section.items():
-                                logger.info(f'{section_name} Address {address}: {value}')
+            elif selected < len(self.clients):
+                _, _, _, memory_map = self.clients[selected]
+                if memory_map is None:
+                    logger.info("This client doesn't have a memory map.")
+                else:
+                    for section_name, section in memory_map.items():
+                        logger.info(f"\n{section_name}s:\n{'-'*40}")
+                        for address, value in section.items():
+                            logger.info(f'{section_name.capitalize()} Address {address}: {value}')
             elif choice == '3' and self.clients:
                 self.print_clients()
                 selected = input("Select a device (or 'back' to go back): ")
