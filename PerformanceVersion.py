@@ -197,7 +197,7 @@ class ModbusScanner:
 
         # Print the table
         for section_name, section_table in table.items():
-            print(f"\n{section_name}s:\n{'-'*50}")
+            print(f"\n{section_name}:\n{'-'*50}")
             print("Memory Address | Initial Value | " + " | ".join(f"{i+1}st Poll Value" for i in range(polling_amount)))
             for row in section_table:
                 print(" | ".join(str(cell) for cell in row))
