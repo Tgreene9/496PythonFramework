@@ -239,7 +239,7 @@ class ModbusScanner:
                         logger.info("This client doesn't have a memory map.")
                     else:
                         for section_name, section in memory_map.items():
-                            logger.info(f"\n{section_name}s:\n{'-'*40}")
+                            logger.info(f"\n{section_name}:\n{'-'*40}")
                             for address, value in section.items():
                                 logger.info(f'{section_name.capitalize()} Address {address}: {value}')
         
