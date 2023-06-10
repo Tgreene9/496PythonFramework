@@ -5,13 +5,14 @@ import netifaces
 import ipaddress
 from pymodbus.client import ModbusTcpClient
 from pymodbus.mei_message import ReadDeviceInformationRequest
-from pymodbus.exceptions import ModbusException, ModbusIOException
+from pymodbus.exceptions import ModbusException
 import socket
 import numpy as np
 import time
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
+
 
 class ModbusScanner:
     def __init__(self):
@@ -83,7 +84,7 @@ class ModbusScanner:
                             values[address] = response.bits[0]
                         else:
                             values[address] = response.registers[0]
-                except ModbusException as e:
+                except ModbusException:
                     pass
 
             # Add the values for the section if no errors occurred
@@ -91,7 +92,6 @@ class ModbusScanner:
                 memory_map[section] = values
 
         return memory_map
-
 
     def modbus_scan(self):
         self.clients.clear()
@@ -116,7 +116,6 @@ class ModbusScanner:
                 logger.exception(f"Failed to connect or read memory map for {ip}: {e}")
                 self.clients.append((ip, None, None, None))
 
-
     def print_clients(self, re_read_memory=False):
         for i, client in enumerate(self.clients, 1):
             ip, device_info, role, memory_map = client
@@ -132,8 +131,6 @@ class ModbusScanner:
                 finally:
                     new_client.close()
             logger.info(f"{i}. {ip} - Device Info: {device_info} - Role: {role}")
-
-
 
     def write_modbus_memory(self, client, section_name, address, value):
         sections = [
@@ -202,8 +199,6 @@ class ModbusScanner:
             for row in section_table:
                 print(" | ".join(str(cell) for cell in row))
 
-
-
     def searchsploit(self, vendor_name):
         try:
             result = subprocess.run(['searchsploit', vendor_name], capture_output=True, text=True)
@@ -211,7 +206,6 @@ class ModbusScanner:
         except Exception as e:
             print(f"An error occurred while running searchsploit: {e}")
             return None
-
 
     def run(self):
         while True:
@@ -304,4 +298,3 @@ class ModbusScanner:
 if __name__ == '__main__':
     scanner = ModbusScanner()
     scanner.run()
-    
