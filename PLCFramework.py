@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import subprocess
 import logging
 import nmap
@@ -5,13 +6,15 @@ import netifaces
 import ipaddress
 from pymodbus.client import ModbusTcpClient
 from pymodbus.mei_message import ReadDeviceInformationRequest
-from pymodbus.exceptions import ModbusException, ModbusIOException
+from pymodbus.exceptions import ModbusException
+from prettytable import PrettyTable
 import socket
 import numpy as np
 import time
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
+
 
 class ModbusScanner:
     def __init__(self):
@@ -37,7 +40,7 @@ class ModbusScanner:
         return netifaces.ifaddresses(default_interface)[netifaces.AF_INET][0]['netmask']
 
     def get_network(self):
-        ip_interface = ipaddress.IPv4Interface(self.local_ip + '/' + self.subnet_mask)
+        ip_interface = ipaddress.IPv4Interface(f'{self.local_ip}/{self.subnet_mask}')
         return ip_interface.network
 
     def connect_scan(self):
@@ -57,7 +60,7 @@ class ModbusScanner:
         else:
             return None
 
-    def read_modbus_memory(self, client):
+    def read_modbus_memory(self, client, addresses=None):
         sections = {
             'coils': {'start_address': 0, 'num_elements': 100, 'read_func': client.read_coils},
             'discrete_inputs': {'start_address': 0, 'num_elements': 100, 'read_func': client.read_discrete_inputs},
@@ -71,7 +74,11 @@ class ModbusScanner:
             read_func = config['read_func']
             values = {}
 
-            for address in range(start_address, start_address + num_elements):
+            address_range = range(start_address, start_address + num_elements)
+            if addresses is not None:
+                address_range = [address for address in address_range if address in addresses]
+
+            for address in address_range:
                 try:
                     response = read_func(address, 1)
                     if not response.isError():
@@ -79,8 +86,8 @@ class ModbusScanner:
                             values[address] = response.bits[0]
                         else:
                             values[address] = response.registers[0]
-                except ModbusException as e:
-                   pass
+                except ModbusException:
+                    pass
 
             # Add the values for the section if no errors occurred
             if len(values) > 0:
@@ -111,22 +118,21 @@ class ModbusScanner:
                 logger.exception(f"Failed to connect or read memory map for {ip}: {e}")
                 self.clients.append((ip, None, None, None))
 
-
     def print_clients(self, re_read_memory=False):
         for i, client in enumerate(self.clients, 1):
             ip, device_info, role, memory_map = client
-            if re_read_memory and role == "Server":
+            if re_read_memory and role == "Server" and memory_map is not None:
                 new_client = ModbusTcpClient(ip)
                 new_client.connect()
                 try:
-                    new_memory_map = self.read_modbus_memory(new_client)
+                    valid_addresses = set(address for section in memory_map.values() for address in section.keys())
+                    new_memory_map = self.read_modbus_memory(new_client, addresses=valid_addresses)
                     self.clients[i-1] = (ip, device_info, role, new_memory_map)
                 except Exception as e:
                     logger.exception(f"Failed to re-read memory map for {ip}: {e}")
                 finally:
                     new_client.close()
             logger.info(f"{i}. {ip} - Device Info: {device_info} - Role: {role}")
-
 
     def write_modbus_memory(self, client, section_name, address, value):
         sections = [
@@ -141,12 +147,33 @@ class ModbusScanner:
                         logger.exception(f"Failed to write to {section_name} at address {address}: {response}")
                         return False
                     else:
+                        self.update_memory_map(client, section_name, address)
                         return True
                 except ModbusException as e:
                     logger.exception(f"Failed to write to {section_name} at address {address}: {e}")
                     return False
         logger.error(f"Invalid section name: {section_name}")
         return False
+    
+    def update_memory_map(self, client, section_name, address):
+        sections = {
+            'Coil': {'start_address': 0, 'num_elements': 100, 'read_func': client.read_coils},
+            'Holding Register': {'start_address': 0, 'num_elements': 100, 'read_func': client.read_holding_registers}
+        }
+        config = sections.get(section_name)
+        if config is None:
+            return
+        read_func = config['read_func']
+        try:
+            response = read_func(address, 1)
+            if not response.isError():
+                if section_name == 'Coil':
+                    self.memory_map[section_name][address] = response.bits[0]
+                else:
+                    self.memory_map[section_name][address] = response.registers[0]
+        except ModbusException:
+            pass
+
     
     def poll_device(self):
         self.print_clients()
@@ -190,12 +217,12 @@ class ModbusScanner:
 
         # Print the table
         for section_name, section_table in table.items():
-            print(f"\n{section_name}s:\n{'-'*50}")
-            print("Memory Address | Initial Value | " + " | ".join(f"{i+1}st Poll Value" for i in range(polling_amount)))
+            ptable = PrettyTable()
+            ptable.title = section_name
+            ptable.field_names = ["Memory Address", "Initial Value"] + [f"{i+1}st Poll Value" for i in range(polling_amount)]
             for row in section_table:
-                print(" | ".join(str(cell) for cell in row))
-
-
+                ptable.add_row(row)
+            print(ptable)
 
     def searchsploit(self, vendor_name):
         try:
@@ -204,7 +231,6 @@ class ModbusScanner:
         except Exception as e:
             print(f"An error occurred while running searchsploit: {e}")
             return None
-
 
     def run(self):
         while True:
@@ -232,7 +258,7 @@ class ModbusScanner:
                         logger.info("This client doesn't have a memory map.")
                     else:
                         for section_name, section in memory_map.items():
-                            logger.info(f"\n{section_name}s:\n{'-'*40}")
+                            logger.info(f"\n{section_name}:\n{'-'*40}")
                             for address, value in section.items():
                                 logger.info(f'{section_name.capitalize()} Address {address}: {value}')
         
@@ -297,4 +323,3 @@ class ModbusScanner:
 if __name__ == '__main__':
     scanner = ModbusScanner()
     scanner.run()
-    
