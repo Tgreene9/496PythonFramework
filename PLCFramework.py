@@ -22,6 +22,7 @@ class ModbusScanner:
         self.subnet_mask = self.get_subnet_mask()
         self.network = self.get_network()
         self.clients = []
+        self.memory_map = {}
         logger.info(f"Hostname: {socket.gethostname()}")
         logger.info(f"Local IP: {self.local_ip}")
         logger.info(f"Subnet Mask: {self.subnet_mask}")
@@ -157,8 +158,8 @@ class ModbusScanner:
     
     def update_memory_map(self, client, section_name, address):
         sections = {
-            'Coil': {'start_address': 0, 'num_elements': 100, 'read_func': client.read_coils},
-            'Holding Register': {'start_address': 0, 'num_elements': 100, 'read_func': client.read_holding_registers}
+            'coils': {'start_address': 0, 'num_elements': 100, 'read_func': client.read_coils},
+            'holding_registers': {'start_address': 0, 'num_elements': 100, 'read_func': client.read_holding_registers}
         }
         config = sections.get(section_name)
         if config is None:
